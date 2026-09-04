@@ -7,7 +7,7 @@ derives training metrics from the raw record stream, and renders the result both
 
 Everything runs locally in the browser. No file ever leaves your machine.
 
-**Live demo:** https://GITHUB_USER.github.io/fitbrain/ (static build of `main`, deployed by GitHub Actions).
+**Live demo:** https://bkowiec.github.io/fitbrain/ (static build of `main`, deployed by GitHub Actions).
 
 ## Supported devices
 

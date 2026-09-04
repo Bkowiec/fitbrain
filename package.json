@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "description": "Browser-based analyzer for .fit activity files: decodes everything the device recorded and produces an LLM-ready report. Runs 100% locally.",
   "license": "MIT",
+  "homepage": "https://bkowiec.github.io/fitbrain/",
+  "repository": { "type": "git", "url": "https://github.com/Bkowiec/fitbrain.git" },
+  "bugs": "https://github.com/Bkowiec/fitbrain/issues",
   "type": "module",
   "engines": { "node": ">=20" },
   "scripts": {
