@@ -27,11 +27,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      # Creates the Pages site on first run (Settings -> Pages -> Source: GitHub Actions) if it does not exist yet.
-      - if: github.event_name != 'pull_request'
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
+      # Pages must be enabled once by a repo admin: Settings -> Pages -> Source: "GitHub Actions".
+      # (GITHUB_TOKEN cannot create the Pages site itself.)
       - if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3
         with:
