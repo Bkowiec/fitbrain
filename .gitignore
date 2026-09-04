@@ -1,0 +1,14 @@
+# dependencies & build output
+node_modules
+dist
+*.tsbuildinfo
+
+# activity files contain personal data (GPS, heart rate) - never commit them
+*.fit
+*.FIT
+
+# local env & OS noise
+.env
+.env.*
+.DS_Store
+*.log

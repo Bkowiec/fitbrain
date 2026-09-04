@@ -1,0 +1,26 @@
+import { readFileSync, writeFileSync } from 'node:fs';
+import { decodeFit } from '../src/fit/decode';
+import { analyze } from '../src/fit/analyze';
+import { toMarkdown } from '../src/export/markdown';
+import { toJson } from '../src/export/json';
+
+const file = process.argv[2];
+const outBase = process.argv[3] ?? '/tmp/fitbrain-report';
+const buf = readFileSync(file);
+const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+const t0 = Date.now();
+const fit = decodeFit(ab, file.split('/').pop()!);
+const t1 = Date.now();
+const settings = process.env.FITBRAIN_SETTINGS ? JSON.parse(process.env.FITBRAIN_SETTINGS) : {};
+const a = analyze(fit, settings);
+const t2 = Date.now();
+const md = toMarkdown(a, 'full');
+const mdc = toMarkdown(a, 'compact');
+const json = toJson(a);
+const t3 = Date.now();
+writeFileSync(`${outBase}.full.md`, md);
+writeFileSync(`${outBase}.compact.md`, mdc);
+writeFileSync(`${outBase}.json`, json);
+console.log(`decode ${t1 - t0} ms, analyze ${t2 - t1} ms, export ${t3 - t2} ms`);
+console.log(`full md: ${md.length} chars, compact md: ${mdc.length} chars, json: ${json.length} chars`);
+console.log(`sessions: ${a.sessions.length}, laps: ${a.sessions[0].laps.length}, splits: ${a.sessions[0].splits.length}, zones: ${a.sessions[0].zones.map(z => z.id).join(',')}, hists: ${a.sessions[0].histograms.length}, efforts: ${a.sessions[0].bestEfforts.length}, peaks: ${a.sessions[0].peakPower.length}, pauses: ${a.sessions[0].pauses.length}, series: ${a.sessions[0].series.length}, digest rows: ${a.sessions[0].digest.length}`);
