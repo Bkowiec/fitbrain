@@ -43,6 +43,18 @@ export function fmtDuration(s: number | undefined, forceHours = false): string {
   return `${m}:${pad2(sec)}`;
 }
 
+/** "h:mm:ss", "mm:ss" or plain seconds -> seconds; undefined when not parseable. */
+export function parseDuration(text: string): number | undefined {
+  const t = text.trim();
+  if (!t) return undefined;
+  const parts = t.split(':').map((x) => x.trim());
+  if (parts.some((x) => x === '' || !/^\d+(\.\d+)?$/.test(x))) return undefined;
+  const nums = parts.map(Number);
+  if (nums.length > 3) return undefined;
+  const sec = nums.reduce((acc, v) => acc * 60 + v, 0);
+  return sec > 0 ? sec : undefined;
+}
+
 /** Seconds -> "2h 46m" style. */
 export function fmtDurationHuman(s: number | undefined): string {
   if (!isNum(s)) return '–';

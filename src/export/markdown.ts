@@ -1,5 +1,7 @@
-import type { Analysis, DevStreamDef, KV, SessionAnalysis, ZoneSet, Histogram, ZoneSense, ZoneSenseCrossing } from '../fit/types';
-import { fmtCoord, fmtDuration, fmtFixed, fmtKm, fmtLocal, fmtNum, fmtPct, fmtSpeed, fmtTz, isNum, signed, speedUnitsLabel } from '../fit/format';
+import type { Analysis, DevStreamDef, DfaAlpha1, DfaCrossing, DfaThreshold, KV, RacePredictions, SessionAnalysis, ZoneSet, Histogram, ZoneSense, ZoneSenseCrossing } from '../fit/types';
+import { fmtCoord, fmtDuration, fmtFixed, fmtKm, fmtLocal, fmtNum, fmtPaceSeconds, fmtPct, fmtSpeed, fmtTz, isNum, signed, speedUnitsLabel } from '../fit/format';
+import { DFA_AEROBIC, DFA_ANAEROBIC } from '../fit/dfa';
+import { ZONESENSE_AEROBIC, ZONESENSE_ANAEROBIC } from '../fit/zonesense';
 
 export type MdMode = 'full' | 'compact';
 
@@ -49,6 +51,64 @@ function zoneSenseMarkdown(z: ZoneSense, s: SessionAnalysis, mode: MdMode): stri
     out.push(`Per ${unit}:\n\n${table(['#', 'At km', 'Mean index', '% anaerobic', '% VO2max', 'Avg HR', s.speedMode === 'kmh' ? 'km/h' : 'Pace', 'Avg W'], z.perSplit.map((p) => [p.index, fmtFixed(p.endDist / 1000, 2), fmtFixed(p.mean, 3), fmtPct(p.anaerobicPct, 0), fmtPct(p.vo2maxPct, 0), n0(p.avgHr), spd(p.avgSpeed), n0(p.avgPower)]))}`);
   }
   return out.join('\n\n');
+}
+
+function dfaMarkdown(d: DfaAlpha1, s: SessionAnalysis, mode: MdMode): string {
+  const out: string[] = [];
+  const spd = (v?: number) => (isNum(v) ? fmtSpeed(v, s.speedMode, false) : undefined);
+  const total = d.times.aerobic + d.times.heavy + d.times.severe;
+  const pct = (v: number) => (total > 0 ? fmtPct((v / total) * 100, 1) : '–');
+  const cross = (c?: DfaCrossing) => (c ? `timer ${fmtDuration(c.timer)}${isNum(c.dist) ? `, km ${fmtFixed(c.dist / 1000, 2)}` : ''}${isNum(c.hr) ? `, HR ${fmtNum(c.hr, 0)}` : ''}` : 'never');
+  const thr = (t: DfaThreshold | undefined, name: string) => {
+    if (!t) return `- ${name}: not estimable (the session lacks sustained, reliable data on both sides of this intensity, or the candidate HR was not consistent with the rest of the session)`;
+    const parts: string[] = [];
+    if (isNum(t.hr)) parts.push(`${fmtNum(t.hr, 0)} bpm by regression of HR on α1 (r ${fmtFixed(t.r, 2)}, n ${t.n} windows)`);
+    if (isNum(t.hrNear)) parts.push(`${fmtNum(t.hrNear, 0)} bpm as the median HR of windows within ±0.05 of α1 = ${t.alpha1}`);
+    if (isNum(t.speed)) parts.push(`${spd(t.speed)} ${speedUnitsLabel(s.speedMode)}`);
+    if (isNum(t.power)) parts.push(`${fmtNum(t.power, 0)} W`);
+    if (!t.reached) parts.push('one-sided data, rough indication only');
+    return `- ${name}: ${parts.join('; ')}`;
+  };
+  out.push('### DFA α1 (HRV-based intensity, computed from RR intervals)');
+  out.push(`Short-term detrended fluctuation analysis of beat-to-beat intervals in ${d.windowSec}-s windows recomputed every ${d.stepSec} s (box sizes ${d.boxRange[0]}–${d.boxRange[1]} beats). α1 falls with intensity, largely independently of heart rate. Thresholds: aerobic threshold (HRVT1) at α1 ≈ ${d.thresholds.aerobic}, anaerobic threshold (HRVT2) at α1 ≈ ${d.thresholds.anaerobic}. ${d.rrCount} RR intervals, ${fmtPct(d.artefactPct, 1)} corrected as artefacts; ${d.reliableWindows} of ${d.windows.length} windows reliable (≤ 5 % corrected beats and no strap jitter); a reliable α1 value covers ${fmtPct(d.coveragePct, 0)} of timer time; first value at timer ${fmtDuration(d.startsAtTimer)}. RR timing: ${d.timingSource}. Heart rate in this section: ${d.hrSource === 'device' ? 'the device HR stream' : 'derived from RR intervals (no HR stream in the file)'}.`);
+  out.push(table(['Zone', 'α1 range', 'Time', 'Share', 'Mean HR'], [
+    ['Aerobic (below HRVT1)', `> ${d.thresholds.aerobic}`, fmtDuration(d.times.aerobic), pct(d.times.aerobic), n0(d.hrMeanAerobic)],
+    ['Heavy (between thresholds)', `${d.thresholds.anaerobic} … ${d.thresholds.aerobic}`, fmtDuration(d.times.heavy), pct(d.times.heavy), n0(d.hrMeanHeavy)],
+    ['Severe (above HRVT2)', `< ${d.thresholds.anaerobic}`, fmtDuration(d.times.severe), pct(d.times.severe), n0(d.hrMeanSevere)],
+  ]));
+  const lines = [
+    thr(d.hrvt1, `Aerobic threshold estimate (α1 = ${d.thresholds.aerobic})`),
+    thr(d.hrvt2, `Anaerobic threshold estimate (α1 = ${d.thresholds.anaerobic})`),
+    `- α1 statistics: min ${fmtFixed(d.stats.min, 2)}, p10 ${fmtFixed(d.stats.p10, 2)}, median ${fmtFixed(d.stats.median, 2)}, mean ${fmtFixed(d.stats.mean, 2)}, p90 ${fmtFixed(d.stats.p90, 2)}, max ${fmtFixed(d.stats.max, 2)}`,
+    `- First reliable window below ${d.thresholds.aerobic}: ${cross(d.firstBelowAerobic)}`,
+    `- First ${d.sustainedWindowSec} s continuously below ${d.thresholds.aerobic}: ${cross(d.firstSustainedBelowAerobic)}`,
+    `- First reliable window below ${d.thresholds.anaerobic}: ${cross(d.firstBelowAnaerobic)}`,
+  ];
+  if (isNum(d.corrWithHr)) lines.push(`- Correlation of α1 with HR: ${fmtFixed(d.corrWithHr, 2)} (negative expected; the further from −1, the more α1 adds beyond HR)`);
+  if (d.halves) lines.push(`- Mean α1 first half ${fmtFixed(d.halves.first, 3)} → second half ${fmtFixed(d.halves.second, 3)} (a fall at constant pace suggests accumulating fatigue)`);
+  if (d.ddfa) lines.push(`- Agreement with the device's Suunto ZoneSense DDFA index: correlation ${fmtFixed(d.ddfa.corr, 2)} over ${d.ddfa.n} samples${isNum(d.ddfa.deviceAerobicTimer) ? `; device first below its aerobic threshold at timer ${fmtDuration(d.ddfa.deviceAerobicTimer)}` : ''}`);
+  out.push(lines.join('\n'));
+  if (mode === 'full' && d.perSplit.length) {
+    const unit = d.splitDistance >= 1000 ? `${d.splitDistance / 1000} km` : `${d.splitDistance} m`;
+    out.push(`Per ${unit}:\n\n${table(['#', 'At km', 'Mean α1', '% heavy', '% severe', 'Avg HR', s.speedMode === 'kmh' ? 'km/h' : 'Pace', 'Avg W'], d.perSplit.map((p) => [p.index, fmtFixed(p.endDist / 1000, 2), fmtFixed(p.mean, 3), fmtPct(p.heavyPct, 0), fmtPct(p.severePct, 0), n0(p.avgHr), spd(p.avgSpeed), n0(p.avgPower)]))}`);
+  }
+  return out.join('\n\n');
+}
+
+function predictionsMarkdown(p: RacePredictions): string {
+  const b = p.basis;
+  const src = b.source === 'race' ? 'a recent race entered in Athlete settings' : `the fastest ${b.name} effort in this session`;
+  const pace = (sec: number, d: number) => fmtPaceSeconds(sec / (d / 1000));
+  const rows = p.rows.map((r) => [r.name, fmtDuration(r.riegel), fmtDuration(r.vdot), pace(r.vdot, r.distance)]);
+  const others = p.bases.filter((x) => x !== b).map((x) => `${x.name} ${fmtDuration(x.time)} (VDOT ${fmtNum(x.vdot, 1)})`);
+  const paces = p.trainingPaces.map((t) => `${t.name} ${t.label} ${fmtPaceSeconds(t.paceSlow)}–${fmtPaceSeconds(t.paceFast)}`).join('; ');
+  return [
+    '### Race predictions',
+    `Basis: ${b.name} in ${fmtDuration(b.time)} from ${src}, VDOT ${fmtNum(b.vdot, 1)} (Daniels & Gilbert). Riegel uses exponent ${p.riegelExponent}. ${b.source === 'effort' ? 'Efforts inside a training run are usually slower than a race, so these predictions tend to be conservative; enter a real race result in Athlete settings for a better basis.' : ''}`.trim(),
+    table(['Distance', 'Riegel', 'VDOT', 'Pace (VDOT, min/km)'], rows),
+    others.length ? `Other candidate bases in this session: ${others.join(', ')}.` : '',
+    `Daniels training paces at VDOT ${fmtNum(b.vdot, 1)} (min/km): ${paces}.`,
+  ].filter(Boolean).join('\n\n');
 }
 
 function zoneTable(z: ZoneSet): string {
@@ -114,12 +174,18 @@ function sessionMarkdown(s: SessionAnalysis, mode: MdMode, multi: boolean): stri
     const zs = mode === 'compact' ? s.zones.filter((z) => z.source === 'device').concat(s.zones.filter((z) => z.source === 'computed' && !s.zones.some((d) => d.source === 'device' && d.id.split('_')[0] === z.id.split('_')[0]))) : s.zones;
     out.push(`### Intensity zones\n\n${zs.map(zoneTable).join('\n\n')}`);
   }
+  if (s.dfa) out.push(dfaMarkdown(s.dfa, s, mode));
   if (s.zoneSense) out.push(zoneSenseMarkdown(s.zoneSense, s, mode));
+  if (s.hrv) {
+    const h = s.hrv;
+    out.push(`### Heart rate variability (RR intervals recorded during the session)\n- RR intervals: ${h.count} recorded, ${h.count - h.valid} corrected (${fmtPct(h.artefactPct, 1)}) by the shared artefact filter\n- Mean RR: ${fmtNum(h.meanRR, 0)} ms (≈ ${fmtNum(h.meanHr, 0)} bpm)\n- SDNN: ${fmtNum(h.sdnn, 1)} ms\n- RMSSD: ${fmtNum(h.rmssd, 1)} ms\n- pNN50: ${fmtPct(h.pnn50, 1)}\n- RR range: ${fmtNum(h.minRR, 0)}–${fmtNum(h.maxRR, 0)} ms\n\nNote: HRV during exercise is dominated by intensity; compare only with other in-exercise values, not resting HRV.`);
+  }
   if (mode === 'full' && s.histograms.length) out.push(`### Distributions\n\n${s.histograms.map(histTable).join('\n\n')}`);
 
   if (s.bestEfforts.length) {
     out.push(`### Fastest efforts (any continuous segment, timer time)\n\n${table(['Distance', 'Time', paceHdr, 'Started at km'], s.bestEfforts.map((e) => [e.name, fmtDuration(e.time), spd(e.speed), fmtFixed(e.startDist / 1000, 2)]))}`);
   }
+  if (s.predictions) out.push(predictionsMarkdown(s.predictions));
   if (s.peakPower.length) {
     out.push(`### Peak power (best average over window)\n\n${table(['Window', 'Watts', 'Started at (timer)'], s.peakPower.map((p) => [p.label, n0(p.watts), fmtDuration(p.startTimer)]))}`);
   }
@@ -151,7 +217,9 @@ function sessionMarkdown(s: SessionAnalysis, mode: MdMode, multi: boolean): stri
     out.push(`### GPS\n- Start: ${s.gps.start ? fmtCoord(s.gps.start[0], s.gps.start[1]) : '–'}\n- End: ${s.gps.end ? fmtCoord(s.gps.end[0], s.gps.end[1]) : '–'}\n- Bounding box (minLat, minLon, maxLat, maxLon): ${s.gps.bbox ? s.gps.bbox.map((x) => x.toFixed(5)).join(', ') : '–'}\n- Coverage: ${fmtPct(s.gps.coveragePct, 0)} of samples`);
   }
   if (mode === 'full') {
-    out.push(`### Record streams (per-sample statistics)\n\n${table(['Stream', 'Units', 'Samples', 'Coverage', 'Min', 'Avg', 'Max'], s.streams.map((st) => [st.label, st.units, st.count, fmtPct(st.coverage * 100, 0), n1(st.min), n1(st.avg), n1(st.max)]))}`);
+    const recorded = s.streams.filter((st) => !st.field.startsWith('calc:'));
+    const calc = s.streams.filter((st) => st.field.startsWith('calc:'));
+    out.push(`### Record streams (per-sample statistics, as recorded)\n\n${table(['Stream', 'Units', 'Samples', 'Coverage', 'Min', 'Avg', 'Max'], recorded.map((st) => [st.label, st.units, st.count, fmtPct(st.coverage * 100, 0), n1(st.min), n1(st.avg), n1(st.max)]))}${calc.length ? `\n\nStreams computed by the analyzer (not recorded by the device): ${calc.map((st) => `${st.label} · coverage ${fmtPct(st.coverage * 100, 0)}, ${n1(st.min)}–${n1(st.max)} (avg ${n1(st.avg)})`).join('; ')}` : ''}`);
     out.push(`### Data quality\n${kvList(s.quality)}`);
   }
   return out.join('\n\n');
@@ -170,11 +238,6 @@ export function toMarkdown(a: Analysis, mode: MdMode = 'full'): string {
 
   for (const s of a.sessions) out.push(sessionMarkdown(s, mode, a.sessions.length > 1));
 
-  if (a.hrv) {
-    const h = a.hrv;
-    out.push(`## Heart rate variability (RR intervals recorded during the activity)\n- RR intervals: ${h.count} recorded, ${h.valid} used (${fmtPct(h.artefactPct, 1)} filtered as artefacts)\n- Mean RR: ${fmtNum(h.meanRR, 0)} ms (≈ ${fmtNum(h.meanHr, 0)} bpm)\n- SDNN: ${fmtNum(h.sdnn, 1)} ms\n- RMSSD: ${fmtNum(h.rmssd, 1)} ms\n- pNN50: ${fmtPct(h.pnn50, 1)}\n- RR range: ${fmtNum(h.minRR, 0)}–${fmtNum(h.maxRR, 0)} ms\n\nNote: HRV during exercise is dominated by intensity; compare only with other in-exercise values, not resting HRV.`);
-  }
-
   if (mode === 'full') {
     if (a.devices.length) {
       out.push(`## Devices and sensors\n\n${table(['Role', 'Manufacturer', 'Product', 'Serial', 'SW', 'Battery', 'Source/ANT type'], a.devices.map((d) => [d.role, d.manufacturer, d.product, d.serial, d.software, d.battery, [d.source, d.antDeviceType].filter(Boolean).join(' / ')]))}`);
@@ -192,13 +255,15 @@ export function toMarkdown(a: Analysis, mode: MdMode = 'full'): string {
     }
   }
 
+  out.push(`## Methods and assumptions\n${kvList(a.methods)}`);
+
   out.push(`## How to read this report
 - "Timer time" excludes pauses (auto-pause and manual stops); "elapsed time" is wall-clock from start to end. Splits, digest, zones and efforts use timer time.
 - Pace is shown as ${first ? speedUnitsLabel(first.speedMode) : 'min/km'}${first?.speedMode === 'kmh' ? '' : ' (minutes:seconds per unit distance; lower is faster)'}. Speeds in the raw data are m/s.
 - Running cadence in FIT files is in strides/min (one leg); steps/min is twice that value. Cycling cadence is crank rpm.
 - Zone tables marked "device" come from the watch's own zone settings; "computed" tables use the stated basis (max HR, LTHR or FTP) and the analyzer's default zone boundaries. Computed HR zones are only produced when a real max HR or LTHR is known, never from the activity's own peak HR.
-- A note "inconsistent with the record stream" on a device value means the session summary written by the device contradicts its own per-second data (a known export bug on some devices); use the stream-derived value listed under computed metrics instead.${a.sessions.some((s) => s.zoneSense) ? `\n- Suunto ZoneSense / DDFA: an HRV-based intensity index where 0 is the athlete's aerobic baseline; values below -0.2 indicate the anaerobic zone and below -0.5 the VO2max zone. It is largely independent of heart rate, so it can flag metabolic strain that HR alone does not show. The device ignores the first 10 minutes.` : ''}
-- Normalized Power, Intensity Factor, TSS, Efficiency Factor and decoupling are standard endurance-training metrics computed here from the raw stream; device-reported values, where present, are listed in the summary.
+- A note "inconsistent with the record stream" on a device value means the session summary written by the device contradicts its own per-second data (a known export bug on some devices); use the stream-derived value listed under computed metrics instead.${a.sessions.some((s) => s.dfa) ? `\n- DFA α1: the short-term scaling exponent of the RR-interval series, computed by the analyzer from the beat-to-beat data in the file. It falls as intensity rises: values above ${DFA_AEROBIC} indicate the aerobic (easy) domain, ${DFA_ANAEROBIC}–${DFA_AEROBIC} the heavy domain between the aerobic and anaerobic thresholds, below ${DFA_ANAEROBIC} the severe domain. HRVT1/HRVT2 are the device heart rates at which α1 crosses ${DFA_AEROBIC} and ${DFA_ANAEROBIC}, estimated from this session only; a single easy or steady session may not allow an estimate. The α1 column in the splits and digest is the mean of reliable windows.` : ''}${a.sessions.some((s) => s.zoneSense) ? `\n- Suunto ZoneSense / DDFA: an HRV-based intensity index where 0 is the athlete's aerobic baseline; values below ${ZONESENSE_AEROBIC} indicate the anaerobic zone and below ${ZONESENSE_ANAEROBIC} the VO2max zone. It is largely independent of heart rate, so it can flag metabolic strain that HR alone does not show. The device ignores the first 10 minutes.` : ''}
+- Normalized Power, Intensity Factor, TSS, Efficiency Factor and decoupling are standard endurance-training metrics computed here from the raw stream; device-reported values, where present, are listed in the summary.${a.sessions.some((s) => s.predictions) ? `\n- Race predictions: Riegel scales the reference time by (distance ratio)^1.06; the VDOT method (Daniels & Gilbert) converts the reference into a pseudo-VO2max and solves it for each distance. Both assume the athlete is equally prepared for the target distance; a reference taken from a training run understates race fitness.` : ''}
 - Aerobic decoupling compares (pace or power) / HR between the first and second half of the session; values under ~5% suggest good aerobic durability.
 - Elevation gain marked "computed" uses a smoothed altitude stream with 2 m hysteresis and may differ from the device total.
 - Developer fields are vendor extensions (e.g. Suunto, Stryd, Garmin Connect IQ) and carry the vendor's own semantics.`);

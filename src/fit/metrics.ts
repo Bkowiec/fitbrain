@@ -3,8 +3,13 @@ import type {
   DigestRow, HrvStats, SeriesPoint,
 } from './types';
 import { isNum, mean } from './format';
+import { cleanRr } from './rr';
 
 export interface Interval { startMs: number; endMs: number }
+export const ELEVATION_HYSTERESIS_M = 2;
+export const ELEVATION_SMOOTH_SAMPLES = 5;
+export const NP_WINDOW_SEC = 30;
+export const DT_CAP_SEC = 30; // longest interval a single record may represent in time-weighted sums
 
 /** Returns a function mapping an epoch-ms timestamp to timer (moving) seconds. */
 export function buildTimerMapper(startMs: number, pauses: Interval[]): (ts: number) => number {
@@ -30,10 +35,10 @@ export function detectGaps(tsList: number[], thresholdSec: number): Interval[] {
 }
 
 /** Elevation gain/loss with light smoothing and hysteresis (m). */
-export function elevationGain(alts: (number | undefined)[], threshold = 2): { ascent: number; descent: number } {
+export function elevationGain(alts: (number | undefined)[], threshold = ELEVATION_HYSTERESIS_M): { ascent: number; descent: number } {
   const vals = alts.filter(isNum) as number[];
   if (vals.length < 2) return { ascent: 0, descent: 0 };
-  const win = 5;
+  const win = ELEVATION_SMOOTH_SAMPLES;
   const smooth: number[] = [];
   for (let i = 0; i < vals.length; i++) {
     const a = Math.max(0, i - Math.floor(win / 2));
@@ -137,10 +142,32 @@ export function computeSplits(samples: Sample[], meters: number): Split[] {
 }
 
 /** Time-weighted delta for a sample (seconds attributed to sample i). */
-function dtAt(samples: Sample[], i: number): number {
+export function dtAt(samples: Sample[], i: number): number {
   if (i === 0) return 0;
   const dt = samples[i].timer - samples[i - 1].timer;
-  return Math.max(0, Math.min(30, dt));
+  return Math.max(0, Math.min(DT_CAP_SEC, dt));
+}
+
+/**
+ * Time-weighted seconds of a per-sample value falling into ordered bands (first matching band wins), optionally limited
+ * to a timer range (from, to]. Shared by computed zones, ZoneSense and DFA α1 so every "time in zone" means the same thing.
+ */
+export function timeInBands(samples: Sample[], get: (s: Sample) => number | undefined, bands: ((v: number) => boolean)[], from = -Infinity, to = Infinity): { seconds: number[]; total: number } {
+  const seconds = bands.map(() => 0);
+  let total = 0;
+  for (let i = 1; i < samples.length; i++) {
+    const smp = samples[i];
+    if (smp.timer <= from || smp.timer > to) continue;
+    const v = get(smp);
+    if (!isNum(v)) continue;
+    const dt = dtAt(samples, i);
+    if (dt <= 0) continue;
+    const z = bands.findIndex((f) => f(v));
+    if (z < 0) continue;
+    seconds[z] += dt;
+    total += dt;
+  }
+  return { seconds, total };
 }
 
 export function deviceZoneSet(id: string, title: string, arr: unknown, units: string, highs?: number[]): ZoneSet | undefined {
@@ -302,13 +329,14 @@ export function peakPowers(grid: Float64Array): PeakPower[] {
 /** Normalized Power (30 s rolling average, 4th-power mean). */
 export function normalizedPower(grid: Float64Array): number | undefined {
   const n = grid.length;
-  if (n < 30) return undefined;
+  const W = NP_WINDOW_SEC;
+  if (n < W) return undefined;
   const prefix = new Float64Array(n + 1);
   for (let i = 0; i < n; i++) prefix[i + 1] = prefix[i] + grid[i];
   let sum4 = 0;
   let cnt = 0;
-  for (let i = 0; i + 30 <= n; i++) {
-    const avg = (prefix[i + 30] - prefix[i]) / 30;
+  for (let i = 0; i + W <= n; i++) {
+    const avg = (prefix[i + W] - prefix[i]) / W;
     sum4 += avg ** 4;
     cnt++;
   }
@@ -422,25 +450,12 @@ export function toSeries(samples: Sample[], maxPoints = 900): SeriesPoint[] {
   return out;
 }
 
-/** Basic HRV statistics from RR intervals (seconds). */
-export function hrvStats(hrvMesgs: { time?: unknown }[] | undefined): HrvStats | undefined {
-  if (!hrvMesgs?.length) return undefined;
-  const rr: number[] = [];
-  for (const m of hrvMesgs) {
-    const t = m.time;
-    const arr = Array.isArray(t) ? t : [t];
-    for (const v of arr) if (isNum(v) && v > 0 && v < 65) rr.push(v);
-  }
+/** HRV statistics on the shared, artefact-corrected RR series of a session (seconds in, milliseconds out). */
+export function hrvStats(rr: number[]): HrvStats | undefined {
   if (rr.length < 10) return undefined;
-  const valid: number[] = [];
-  let prev: number | undefined;
-  for (const v of rr) {
-    const physiological = v >= 0.3 && v <= 2.0;
-    const stable = prev === undefined || Math.abs(v - prev) / prev <= 0.2;
-    if (physiological && stable) valid.push(v);
-    if (physiological) prev = v;
-  }
-  if (valid.length < 10) return undefined;
+  const cleaned = cleanRr(rr);
+  const valid = cleaned.rr;
+  const artefacts = cleaned.artefacts.filter(Boolean).length;
   const meanRR = mean(valid)!;
   const sdnn = Math.sqrt(mean(valid.map((v) => (v - meanRR) ** 2))!);
   let sumSq = 0;
@@ -452,7 +467,7 @@ export function hrvStats(hrvMesgs: { time?: unknown }[] | undefined): HrvStats |
   }
   const rmssd = Math.sqrt(sumSq / (valid.length - 1));
   return {
-    count: rr.length, valid: valid.length, artefactPct: ((rr.length - valid.length) / rr.length) * 100,
+    count: rr.length, valid: rr.length - artefacts, artefactPct: (artefacts / rr.length) * 100,
     meanRR: meanRR * 1000, meanHr: 60 / meanRR, sdnn: sdnn * 1000, rmssd: rmssd * 1000,
     pnn50: (nn50 / (valid.length - 1)) * 100, minRR: Math.min(...valid) * 1000, maxRR: Math.max(...valid) * 1000,
   };

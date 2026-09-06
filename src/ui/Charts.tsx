@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Chart, registerables, type ChartConfiguration, type ChartDataset } from 'chart.js';
 import type { SeriesPoint, SessionAnalysis } from '../fit/types';
 import { fmtNum, fmtPaceSeconds, isNum } from '../fit/format';
+import { DFA_AEROBIC, DFA_ANAEROBIC, DFA_FIELD_KEY } from '../fit/dfa';
+import { ZONESENSE_AEROBIC, ZONESENSE_ANAEROBIC, ZONESENSE_FIELD_KEY } from '../fit/zonesense';
 import { Empty } from './common';
+import { isDarkNow, subscribeTheme } from './theme';
 
 Chart.register(...registerables);
 
@@ -20,20 +23,18 @@ export interface MetricDef {
   refLines?: { y: number; label: string }[];
 }
 
+/** Effective dark mode: the explicit theme choice on <html data-theme>, otherwise the system preference. */
 export function usePrefersDark(): boolean {
-  const [dark, setDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const h = (e: MediaQueryListEvent) => setDark(e.matches);
-    mq.addEventListener('change', h);
-    return () => mq.removeEventListener('change', h);
-  }, []);
+  const [dark, setDark] = useState(() => isDarkNow());
+  useEffect(() => subscribeTheme(() => setDark(isDarkNow())), []);
   return dark;
 }
 
 function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
+const fontUi = () => ({ family: cssVar('--font-ui') || 'system-ui', size: 11 });
+const fontNum = () => ({ family: cssVar('--font-num') || 'monospace', size: 10.5 });
 
 export function LineChart({ def, series, xMode, dark, height = 240 }: { def: MetricDef; series: SeriesPoint[]; xMode: XMode; dark: boolean; height?: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -51,7 +52,7 @@ export function LineChart({ def, series, xMode, dark, height = 240 }: { def: Met
     const xMin = xs.length ? Math.min(...xs) : 0;
     const xMax = xs.length ? Math.max(...xs) : 1;
     const datasets: ChartDataset<'line', { x: number; y: number }[]>[] = [{
-      data: points, borderColor: color, backgroundColor: color + '1a', borderWidth: 2, pointRadius: 0, pointHoverRadius: 4,
+      data: points, borderColor: color, backgroundColor: color + '1a', borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 4,
       pointHoverBackgroundColor: color, tension: 0.15, fill: def.fill ? 'origin' : false, spanGaps: false,
     }];
     for (const r of def.refLines ?? []) {
@@ -70,6 +71,7 @@ export function LineChart({ def, series, xMode, dark, height = 240 }: { def: Met
         plugins: {
           legend: { display: false },
           tooltip: {
+            titleFont: fontNum(), bodyFont: fontNum(),
             filter: (item) => item.datasetIndex === 0,
             callbacks: {
               title: (items) => {
@@ -83,8 +85,8 @@ export function LineChart({ def, series, xMode, dark, height = 240 }: { def: Met
           },
         },
         scales: {
-          x: { type: 'linear', title: { display: true, text: xMode === 'time' ? 'Timer time (min)' : 'Distance (km)', color: ink }, grid: { color: grid }, ticks: { color: ink, maxTicksLimit: 12 } },
-          y: { reverse: !!def.reverse, title: { display: true, text: def.units, color: ink }, grid: { color: grid }, ticks: { color: ink, callback: (v) => fmt(Number(v)) } },
+          x: { type: 'linear', title: { display: true, text: xMode === 'time' ? 'Timer time (min)' : 'Distance (km)', color: ink, font: fontUi() }, grid: { color: grid }, ticks: { color: ink, maxTicksLimit: 12, font: fontNum() } },
+          y: { reverse: !!def.reverse, title: { display: true, text: def.units, color: ink, font: fontUi() }, grid: { color: grid }, ticks: { color: ink, callback: (v) => fmt(Number(v)), font: fontNum() } },
         },
       },
     };
@@ -116,14 +118,20 @@ export function standardMetricDefs(s: SessionAnalysis): MetricDef[] {
   return out;
 }
 
+const REF_LINES: Record<string, { y: number; label: string }[]> = {
+  [ZONESENSE_FIELD_KEY]: [{ y: ZONESENSE_AEROBIC, label: `aerobic threshold ${ZONESENSE_AEROBIC}` }, { y: ZONESENSE_ANAEROBIC, label: `anaerobic threshold ${ZONESENSE_ANAEROBIC}` }, { y: 0, label: 'baseline 0' }],
+  [DFA_FIELD_KEY]: [{ y: DFA_AEROBIC, label: `aerobic threshold ${DFA_AEROBIC}` }, { y: DFA_ANAEROBIC, label: `anaerobic threshold ${DFA_ANAEROBIC}` }],
+};
+const UNIT_FALLBACK: Record<string, string> = { [ZONESENSE_FIELD_KEY]: 'index', [DFA_FIELD_KEY]: 'α1' };
+
 export function devMetricDefs(s: SessionAnalysis): MetricDef[] {
   return s.devStreams.map((d, i) => {
     const st = s.streams.find((x) => x.field === d.key);
     const small = st ? Math.abs(st.max - st.min) < 10 : false;
     return {
-      id: d.key, title: d.label, units: d.units || (d.key === 'dev:ddfa' ? 'index' : '–'), get: (p) => p.extra?.[d.key], cssVar: DEV_COLORS[i % DEV_COLORS.length],
+      id: d.key, title: d.label, units: d.units || UNIT_FALLBACK[d.key] || '–', get: (p) => p.extra?.[d.key], cssVar: DEV_COLORS[i % DEV_COLORS.length],
       fmt: (v) => fmtNum(v, small ? 2 : 0),
-      refLines: d.key === 'dev:ddfa' ? [{ y: -0.2, label: 'aerobic threshold −0.2' }, { y: -0.5, label: 'anaerobic threshold −0.5' }, { y: 0, label: 'baseline 0' }] : undefined,
+      refLines: REF_LINES[d.key],
     };
   });
 }
@@ -159,7 +167,7 @@ export function Charts({ s }: { s: SessionAnalysis }) {
       </div>
       {devDefs.length > 0 && (
         <>
-          <h3 className="subhead">Developer / non-standard streams</h3>
+          <h3 className="subhead">Developer, non-standard and computed streams</h3>
           <div className="charts">
             {devDefs.map((d) => <LineChart key={d.id} def={d} series={s.series} xMode={xMode} dark={dark} />)}
           </div>

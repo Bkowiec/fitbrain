@@ -8,7 +8,7 @@ export function loadSettings(): AthleteSettings {
     if (!raw) return {};
     const obj = JSON.parse(raw) as Record<string, unknown>;
     const num = (v: unknown) => (typeof v === 'number' && isFinite(v) && v > 0 ? v : undefined);
-    return { maxHr: num(obj.maxHr), restingHr: num(obj.restingHr), lthr: num(obj.lthr), ftp: num(obj.ftp), weightKg: num(obj.weightKg) };
+    return { maxHr: num(obj.maxHr), restingHr: num(obj.restingHr), lthr: num(obj.lthr), ftp: num(obj.ftp), weightKg: num(obj.weightKg), raceDistanceM: num(obj.raceDistanceM), raceTimeSec: num(obj.raceTimeSec) };
   } catch {
     return {};
   }

@@ -1,14 +1,14 @@
 import type { Histogram, SessionAnalysis, ZoneSet } from '../fit/types';
 import { fmtDuration, fmtNum, fmtPct } from '../fit/format';
-import { Empty } from './common';
+import { Empty, Tag } from './common';
 
-const RAMP = ['#86b6ef', '#6da7ec', '#5598e7', '#3987e5', '#2a78d6', '#256abf', '#1c5cab', '#184f95'];
+const RAMP = ['color-mix(in srgb, var(--accent) 45%, var(--surface))', 'color-mix(in srgb, var(--accent) 55%, var(--surface))', 'color-mix(in srgb, var(--accent) 65%, var(--surface))', 'color-mix(in srgb, var(--accent) 78%, var(--surface))', 'var(--accent)', 'color-mix(in srgb, var(--accent) 88%, var(--text))', 'color-mix(in srgb, var(--accent) 76%, var(--text))', 'color-mix(in srgb, var(--accent) 64%, var(--text))'];
 
 function ZoneBars({ z }: { z: ZoneSet }) {
   const max = Math.max(...z.buckets.map((b) => b.pct), 1);
   return (
     <section className="card">
-      <h3>{z.title}</h3>
+      <h3>{z.title.replace(/ \((device|.*computed)\)$/, '')}<Tag kind={z.source} /></h3>
       <p className="muted small">{z.source === 'device' ? 'As reported by the device.' : 'Computed from the record stream.'}{z.basis ? ` Basis: ${z.basis}.` : ''}</p>
       <div className="bars" role="table">
         {z.buckets.map((b, i) => {
@@ -36,7 +36,7 @@ function HistBars({ h }: { h: Histogram }) {
   const dec = h.binSize < 1 ? 1 : 0;
   return (
     <section className="card">
-      <h3>{h.title}</h3>
+      <h3>{h.title}<Tag kind="computed" /></h3>
       <p className="muted small">Time-weighted share of the activity per {h.binSize} {h.units} bin.</p>
       <div className="hist" role="img" aria-label={`${h.title} histogram`}>
         {bins.map((b, i) => (
@@ -67,7 +67,7 @@ function HistBars({ h }: { h: Histogram }) {
 export function Zones({ s }: { s: SessionAnalysis }) {
   if (!s.zones.length && !s.histograms.length) return <Empty text="No zone data or streams suitable for distributions in this file." />;
   return (
-    <div className="grid">
+    <div className="masonry">
       {s.zones.map((z) => <ZoneBars key={z.id} z={z} />)}
       {s.histograms.map((h) => <HistBars key={h.id} h={h} />)}
     </div>
