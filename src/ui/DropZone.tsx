@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { Mark } from './Brand';
 
 export function DropZone({ onFile, busy }: { onFile: (f: File) => void; busy: boolean }) {
   const [over, setOver] = useState(false);
@@ -15,14 +16,14 @@ export function DropZone({ onFile, busy }: { onFile: (f: File) => void; busy: bo
       onDragLeave={() => setOver(false)}
       onDrop={onDrop}
     >
-      <div className="drop-icon" aria-hidden>{busy ? '⏳' : '⬇'}</div>
-      <h2>{busy ? 'Decoding…' : 'Drop a .fit file here'}</h2>
-      <p>or</p>
+      <div className="drop-icon"><Mark size={40} /></div>
+      <h3>{busy ? 'Decoding…' : 'Drop a .fit file here'}</h3>
+      <p className="or">or</p>
       <label className="btn primary">
         Choose file
         <input type="file" accept=".fit,application/octet-stream" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ''; }} />
       </label>
-      <p className="muted">Garmin, Suunto, Wahoo, COROS, Polar, Zwift and any other FIT activity file. Processed locally in your browser.</p>
+      <p className="fine">stays in this tab · decoded with the official Garmin FIT SDK</p>
     </div>
   );
 }

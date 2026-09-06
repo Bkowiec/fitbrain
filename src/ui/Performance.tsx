@@ -1,6 +1,6 @@
 import type { SessionAnalysis } from '../fit/types';
 import { fmtDuration, fmtFixed, fmtNum, fmtSpeed, isNum, signed, speedUnitsLabel } from '../fit/format';
-import { Empty, Table } from './common';
+import { Empty, Table, Tag } from './common';
 
 export function Performance({ s }: { s: SessionAnalysis }) {
   const paceHdr = s.speedMode === 'kmh' ? `Speed (${speedUnitsLabel(s.speedMode)})` : `Pace (${speedUnitsLabel(s.speedMode)})`;
@@ -17,19 +17,19 @@ export function Performance({ s }: { s: SessionAnalysis }) {
     <div className="stack">
       {s.bestEfforts.length > 0 && (
         <section className="card">
-          <h3>Fastest efforts <span className="muted">(best continuous segment for each distance, timer time)</span></h3>
+          <h3>Fastest efforts <span className="muted">(best continuous segment for each distance, timer time)</span><Tag kind="computed" /></h3>
           <Table headers={['Distance', 'Time', paceHdr, 'Started at km', 'Started at timer']} rows={s.bestEfforts.map((e) => [e.name, fmtDuration(e.time), spd(e.speed), fmtFixed(e.startDist / 1000, 2), fmtDuration(e.startTimer)])} />
         </section>
       )}
       {s.peakPower.length > 0 && (
         <section className="card">
-          <h3>Peak power <span className="muted">(best average over window)</span></h3>
+          <h3>Peak power <span className="muted">(best average over window)</span><Tag kind="computed" /></h3>
           <Table headers={['Window', 'Watts', 'Started at timer']} rows={s.peakPower.map((p) => [p.label, n0(p.watts), fmtDuration(p.startTimer)])} />
         </section>
       )}
       {d && (
         <section className="card">
-          <h3>First half vs second half</h3>
+          <h3>First half vs second half<Tag kind="computed" /></h3>
           <Table
             headers={['Half', 'Time', 'km', paceHdr, 'Avg HR', 'Avg W', cadHdr, 'EF (m/min per bpm)', 'EF (W per bpm)']}
             rows={[d.first, d.second].map((h) => [h.label, fmtDuration(h.time), isNum(h.distance) ? fmtFixed(h.distance / 1000, 2) : undefined, spd(h.avgSpeed), n0(h.avgHr), n0(h.avgPower), cad(h.avgCadence), isNum(h.efPace) ? fmtFixed(h.efPace, 3) : undefined, isNum(h.efPower) ? fmtFixed(h.efPower, 3) : undefined])}
@@ -45,7 +45,7 @@ export function Performance({ s }: { s: SessionAnalysis }) {
       )}
       {s.digest.length > 0 && (
         <section className="card">
-          <h3>Time-series digest <span className="muted">({s.digestBucketSec / 60}-minute buckets of timer time)</span></h3>
+          <h3>Time-series digest <span className="muted">({s.digestBucketSec / 60}-minute buckets of timer time)</span><Tag kind="computed" /></h3>
           <Table
             headers={['Timer window', 'At km', paceHdr, 'Avg HR', 'Avg W', cadHdr, 'Altitude m', 'Asc / Desc m', '°C', ...devCols.map((x) => (x.units ? `${x.label} (${x.units})` : x.label))]}
             rows={s.digest.map((r) => [
@@ -56,8 +56,14 @@ export function Performance({ s }: { s: SessionAnalysis }) {
         </section>
       )}
       <section className="card">
-        <h3>Record streams <span className="muted">(per-sample statistics)</span></h3>
-        <Table headers={['Stream', 'Units', 'Samples', 'Coverage', 'Min', 'Avg', 'Max']} rows={s.streams.map((st) => [st.label, st.units, st.count, `${Math.round(st.coverage * 100)}%`, fmtNum(st.min, 1), fmtNum(st.avg, 1), fmtNum(st.max, 1)])} />
+        <h3>Record streams <span className="muted">(per-sample statistics)</span><Tag kind="device" /></h3>
+        <Table headers={['Stream', 'Units', 'Samples', 'Coverage', 'Min', 'Avg', 'Max']} rows={s.streams.filter((st) => !st.field.startsWith('calc:')).map((st) => [st.label, st.units, st.count, `${Math.round(st.coverage * 100)}%`, fmtNum(st.min, 1), fmtNum(st.avg, 1), fmtNum(st.max, 1)])} />
+        {s.streams.some((st) => st.field.startsWith('calc:')) && (
+          <>
+            <h4 className="subhead">Streams computed by the analyzer <span className="muted small">(not recorded by the device)</span></h4>
+            <Table headers={['Stream', 'Samples', 'Coverage', 'Min', 'Avg', 'Max']} rows={s.streams.filter((st) => st.field.startsWith('calc:')).map((st) => [st.label, st.count, `${Math.round(st.coverage * 100)}%`, fmtNum(st.min, 2), fmtNum(st.avg, 2), fmtNum(st.max, 2)])} />
+          </>
+        )}
       </section>
     </div>
   );

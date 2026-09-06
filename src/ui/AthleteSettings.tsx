@@ -1,5 +1,10 @@
 import { useState } from 'react';
 import type { AthleteSettings, KV } from '../fit/types';
+import { fmtDuration, parseDuration } from '../fit/format';
+
+const RACE_OPTIONS: { label: string; m: number }[] = [
+  { label: '5 km', m: 5000 }, { label: '10 km', m: 10000 }, { label: 'Half marathon', m: 21097.5 }, { label: 'Marathon', m: 42195 },
+];
 
 interface Props { value: AthleteSettings; used: KV[]; onApply: (s: AthleteSettings) => void; onClose: () => void }
 
@@ -13,15 +18,23 @@ const FIELDS: { key: keyof AthleteSettings; label: string; units: string; hint: 
 
 export function AthleteSettingsPanel({ value, used, onApply, onClose }: Props) {
   const [draft, setDraft] = useState<Record<string, string>>(() => Object.fromEntries(FIELDS.map((f) => [f.key, value[f.key] !== undefined ? String(value[f.key]) : ''])));
+  const initialSel = value.raceDistanceM === undefined ? '' : RACE_OPTIONS.find((o) => Math.abs(o.m - value.raceDistanceM!) < 1) ? String(value.raceDistanceM) : 'custom';
+  const [raceSel, setRaceSel] = useState<string>(initialSel);
+  const [raceCustom, setRaceCustom] = useState<string>(value.raceDistanceM !== undefined && initialSel === 'custom' ? String(value.raceDistanceM) : '');
+  const [raceTime, setRaceTime] = useState<string>(value.raceTimeSec !== undefined ? fmtDuration(value.raceTimeSec) : '');
+  const raceDistance = raceSel === 'custom' ? Number(raceCustom) : raceSel ? Number(raceSel) : NaN;
+  const raceSeconds = parseDuration(raceTime);
+  const raceValid = isFinite(raceDistance) && raceDistance >= 1000 && raceSeconds !== undefined && raceSeconds > 60;
   const apply = () => {
     const out: AthleteSettings = {};
     for (const f of FIELDS) {
       const n = Number(draft[f.key]);
       if (draft[f.key].trim() !== '' && isFinite(n) && n > 0) out[f.key] = n;
     }
+    if (raceValid) { out.raceDistanceM = raceDistance; out.raceTimeSec = raceSeconds; }
     onApply(out);
   };
-  const clear = () => { setDraft(Object.fromEntries(FIELDS.map((f) => [f.key, '']))); onApply({}); };
+  const clear = () => { setDraft(Object.fromEntries(FIELDS.map((f) => [f.key, '']))); setRaceSel(''); setRaceCustom(''); setRaceTime(''); onApply({}); };
   return (
     <section className="card panel" role="dialog" aria-label="Athlete settings">
       <div className="card-head">
@@ -40,6 +53,23 @@ export function AthleteSettingsPanel({ value, used, onApply, onClose }: Props) {
             </label>
           );
         })}
+      </div>
+      <h4 className="subhead">Recent race result <span className="muted small">(optional; basis for race predictions instead of training efforts)</span></h4>
+      <div className="form-grid">
+        <label className="field">
+          <span className="field-label">Distance</span>
+          <select className="select" value={raceSel} onChange={(e) => setRaceSel(e.target.value)}>
+            <option value="">not set</option>
+            {RACE_OPTIONS.map((o) => <option key={o.m} value={String(o.m)}>{o.label}</option>)}
+            <option value="custom">custom (metres)</option>
+          </select>
+          {raceSel === 'custom' && <input className="input" type="number" inputMode="numeric" min={1000} step="any" placeholder="e.g. 15000" value={raceCustom} onChange={(e) => setRaceCustom(e.target.value)} />}
+        </label>
+        <label className="field">
+          <span className="field-label">Finish time <span className="muted">(h:mm:ss)</span></span>
+          <input className="input" type="text" inputMode="numeric" placeholder="e.g. 1:45:30" value={raceTime} onChange={(e) => setRaceTime(e.target.value)} />
+          <span className="muted small">{raceSel && !raceValid ? 'enter a distance of at least 1 km and a time like 45:30 or 1:45:30' : 'a real race is a better predictor than efforts inside a training run'}</span>
+        </label>
       </div>
       <div className="inline">
         <button className="btn primary" onClick={apply}>Apply and re-analyze</button>

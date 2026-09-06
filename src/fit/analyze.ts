@@ -3,6 +3,10 @@ import type {
   SessionAnalysis, SpeedMode, StreamStat, ZoneSet, Histogram,
 } from './types';
 import { computeZoneSense } from './zonesense';
+import { DFA_FIELD_KEY, dfaWindows, injectDfaStream, summarizeDfa } from './dfa';
+import { timedBeats } from './rr';
+import { methodsList } from './methods';
+import { predictRaces, raceName } from './predict';
 import { fieldUnits, messageDisplayName } from './decode';
 import {
   fmtCoord, fmtDuration, fmtFixed, fmtKm, fmtLocal, fmtNum, fmtSpeed, fmtTz, humanize, isNum, median,
@@ -400,6 +404,16 @@ function analyzeSession(fit: DecodedFit, s: Msg, index: number, ctxIn: {
     .sort((a, b) => a.ts - b.ts);
   for (let i = 1; i < samples.length; i++) if (samples[i].timer < samples[i - 1].timer) samples[i].timer = samples[i - 1].timer;
 
+  // DFA-α1 from RR intervals (any device that logs them). Computed before the streams so the α1 series joins splits, digest and charts.
+  const rrTimed = timedBeats(fit.rr, startMs);
+  const beats = rrTimed.beats
+    .filter((b) => b.ts >= startMs - 2000 && b.ts <= endMs + 2000)
+    .map((b) => ({ timer: timerAt(b.ts), elapsed: (b.ts - startMs) / 1000, rr: b.rr }));
+  const dfaWin = dfaWindows(beats, samples);
+  injectDfaStream(samples, dfaWin.windows);
+  const rrBeats = beats.length >= 30 ? beats.map((b) => ({ timer: b.timer, rr: b.rr })).sort((a, b) => a.timer - b.timer) : undefined;
+  const hrv = hrvStats(beats.map((b) => b.rr));
+
   const timerTime = isNum(s.totalTimerTime) ? s.totalTimerTime : samples.length ? samples[samples.length - 1].timer : 0;
   const elapsedTime = elapsedField ?? (endMs - startMs) / 1000;
   const pausedTime = Math.max(0, elapsedTime - timerTime);
@@ -426,11 +440,13 @@ function analyzeSession(fit: DecodedFit, s: Msg, index: number, ctxIn: {
   const extraKeys = new Set<string>();
   for (const smp of samples) if (smp.extra) for (const k of Object.keys(smp.extra)) extraKeys.add(k);
   const DEV_LABELS: Record<string, string> = { ddfa: 'DDFA index (ZoneSense)' };
+  const CALC_LABELS: Record<string, { label: string; units: string }> = { [DFA_FIELD_KEY]: { label: 'DFA α1 (computed from RR)', units: '' } };
   for (const k of extraKeys) {
     const isDev = k.startsWith('dev:');
+    const calc = CALC_LABELS[k];
     const name = isDev ? k.slice(4) : k;
-    const units = isDev ? (fit.devFields.find((d) => d.name === name)?.units ?? '') : fieldUnits('recordMesgs', k);
-    defs.push({ field: k, label: isDev ? (DEV_LABELS[name] ?? `${humanize(name)} (developer)`) : humanize(name), units, get: (x) => x.extra?.[k] });
+    const units = calc ? calc.units : isDev ? (fit.devFields.find((d) => d.name === name)?.units ?? '') : fieldUnits('recordMesgs', k);
+    defs.push({ field: k, label: calc ? calc.label : isDev ? (DEV_LABELS[name] ?? `${humanize(name)} (developer)`) : humanize(name), units, get: (x) => x.extra?.[k] });
   }
   const streams = streamStats(samples, defs);
   const has = (f: string) => streams.some((st) => st.field === f && st.coverage > 0.02);
@@ -519,6 +535,8 @@ function analyzeSession(fit: DecodedFit, s: Msg, index: number, ctxIn: {
 
   // Efforts & power
   const efforts = has('dist') && isNum(distance) && distance >= 400 ? bestEfforts(samples) : [];
+  const race = isNum(settings.raceDistanceM) && isNum(settings.raceTimeSec) ? { distanceM: settings.raceDistanceM, timeSec: settings.raceTimeSec } : undefined;
+  const predictions = isRunLike ? predictRaces(efforts, race) : undefined;
   const grid = has('power') ? toGrid(samples, (x) => x.power) : undefined;
   const peaks = grid ? peakPowers(grid) : [];
   const npComputed = grid ? normalizedPower(grid) : undefined;
@@ -537,6 +555,7 @@ function analyzeSession(fit: DecodedFit, s: Msg, index: number, ctxIn: {
   }
 
   const zoneSense = computeZoneSense(samples, splits, splitDistance, s, devNames);
+  const dfa = summarizeDfa(dfaWin.windows, { rrCount: beats.length, rrUsed: dfaWin.rrUsed, artefactPct: dfaWin.artefactPct, timingSource: rrTimed.source, hrSource: dfaWin.hrSource }, samples, splits, splitDistance, zoneSense?.firstBelowAerobic?.timer);
 
   // Summary groups from session fields
   const groupMap = new Map<string, KV[]>();
@@ -671,7 +690,10 @@ function analyzeSession(fit: DecodedFit, s: Msg, index: number, ctxIn: {
   quality.push({ key: 'pausesSource', label: 'Pause detection', value: pausesSource });
   quality.push({ key: 'streams', label: 'Streams present (coverage)', value: streams.filter((st) => st.coverage > 0.01).map((st) => `${st.label} ${Math.round(st.coverage * 100)}%`).join(', ') || 'none' });
   if (gps) quality.push({ key: 'gps', label: 'GPS coverage', value: fmtPct(gps.coveragePct, 0), raw: gps.coveragePct });
-  if (devStreams.length) quality.push({ key: 'devStreams', label: 'Developer / non-standard record streams', value: devStreams.map((d) => `${d.label} ${Math.round(d.coverage * 100)}%`).join(', ') });
+  const recordedExtra = devStreams.filter((d) => !d.key.startsWith('calc:'));
+  const computedStreams = devStreams.filter((d) => d.key.startsWith('calc:'));
+  if (recordedExtra.length) quality.push({ key: 'devStreams', label: 'Developer / non-standard record streams', value: recordedExtra.map((d) => `${d.label} ${Math.round(d.coverage * 100)}%`).join(', ') });
+  if (computedStreams.length) quality.push({ key: 'calcStreams', label: 'Streams computed by the analyzer', value: computedStreams.map((d) => `${d.label} ${Math.round(d.coverage * 100)}%`).join(', '), note: 'not recorded by the device' });
   if (!ctxIn.single) quality.push({ key: 'multi', label: 'Multi-session file', value: `session ${index + 1} of ${ctxIn.total}` });
 
   return {
@@ -681,7 +703,7 @@ function analyzeSession(fit: DecodedFit, s: Msg, index: number, ctxIn: {
     groups, computed,
     laps: laps.map((l, i) => lapRow(l, i, timerAt, ctx.tz)),
     splits, splitDistance, zones, histograms, streams,
-    bestEfforts: efforts, peakPower: peaks, drift, digest, digestBucketSec, series, samples, pauses, devFields, devStreams, zoneSense, gps, quality,
+    bestEfforts: efforts, peakPower: peaks, drift, digest, digestBucketSec, series, samples, pauses, devFields, devStreams, zoneSense, dfa, predictions, rrBeats, hrv, gps, quality,
     raw: s,
   };
 }
@@ -719,6 +741,9 @@ export function analyze(fit: DecodedFit, settings: AthleteSettings = {}): Analys
     pick('lthr', 'Lactate threshold HR', 'bpm', settings.lthr, zt?.thresholdHeartRate, 'from file'),
     pick('ftp', 'Functional threshold power', 'W', settings.ftp, zt?.functionalThresholdPower, 'from file'),
     pick('weightKg', 'Body weight', 'kg', settings.weightKg, up?.weight, 'from file'),
+    isNum(settings.raceDistanceM) && isNum(settings.raceTimeSec)
+      ? { key: 'race', label: 'Recent race result', value: `${raceName(settings.raceDistanceM)} in ${fmtDuration(settings.raceTimeSec)}`, raw: [settings.raceDistanceM, settings.raceTimeSec], note: 'athlete settings; basis for race predictions' }
+      : { key: 'race', label: 'Recent race result', value: 'not set', note: 'predictions fall back to the fastest efforts of the session' },
   ];
 
   const fileId = M.fileIdMesgs?.[0] ?? {};
@@ -755,8 +780,8 @@ export function analyze(fit: DecodedFit, settings: AthleteSettings = {}): Analys
     devices: deviceRows(M.deviceInfoMesgs ?? [], fileId, tz),
     sessions: sessionAnalyses,
     events: eventRows(events, startMs),
-    hrv: hrvStats(M.hrvMesgs),
     profile: profileGroups(fit, tz),
+    methods: methodsList(),
     unknown: { messages: unknownMessages, fieldsByMessage },
     messageCounts: fit.messageCounts,
     settings,

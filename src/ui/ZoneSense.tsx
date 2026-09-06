@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { SessionAnalysis, ZoneSenseCrossing } from '../fit/types';
 import { fmtDuration, fmtFixed, fmtNum, fmtPct, fmtSpeed, isNum, speedUnitsLabel } from '../fit/format';
-import { Empty, Table } from './common';
+import { Empty, Table, Tag } from './common';
 import { LineChart, XModeToggle, defaultXMode, devMetricDefs, standardMetricDefs, usePrefersDark, type XMode } from './Charts';
 
 export function ZoneSenseView({ s }: { s: SessionAnalysis }) {
@@ -26,9 +26,9 @@ export function ZoneSenseView({ s }: { s: SessionAnalysis }) {
   return (
     <div className="stack">
       <section className="card">
-        <h3>Suunto ZoneSense <span className="muted">(DDFA index from the record stream)</span></h3>
+        <h3>Suunto ZoneSense <span className="muted">(DDFA index from the record stream)</span><Tag kind="device" label="device index" /><Tag kind="computed" label="computed times" /></h3>
         <p className="muted small">
-          The DDFA index is an HRV-based intensity measure relative to the athlete's aerobic baseline (0). Suunto places the aerobic threshold at −0.2 and the anaerobic threshold at −0.5;
+          The DDFA index is an HRV-based intensity measure relative to the athlete's aerobic baseline (0). Suunto places the aerobic threshold at {z.thresholds.aerobic} and the anaerobic threshold at {z.thresholds.anaerobic};
           values below them mean the anaerobic and VO2max zones. The device does not compute it during the first 10 minutes. Coverage {fmtPct(z.coveragePct, 0)} of samples, first value at {fmtDuration(z.startsAtTimer)}.
         </p>
         <div className="tiles">
@@ -40,10 +40,10 @@ export function ZoneSenseView({ s }: { s: SessionAnalysis }) {
           <div className="tile"><div className="tile-label">Median index</div><div className="tile-value">{fmtFixed(z.stats.median, 2)}</div><div className="tile-sub">p10 {fmtFixed(z.stats.p10, 2)} · p90 {fmtFixed(z.stats.p90, 2)}</div></div>
         </div>
         <Table headers={['Item', 'Value']} rows={[
-          ['First sample below the aerobic threshold (−0.2)', cross(z.firstBelowAerobic)],
+          [`First sample below the aerobic threshold (${z.thresholds.aerobic})`, cross(z.firstBelowAerobic)],
           [`First time the ${z.sustainedWindowSec}-s moving average dropped below the aerobic threshold`, cross(z.firstSustainedBelowAerobic)],
-          ['First sample below the anaerobic threshold (−0.5)', cross(z.firstBelowAnaerobic)],
-          ['Mean HR when the index was near −0.2', isNum(z.hrAtAerobicCrossing) ? `${fmtNum(z.hrAtAerobicCrossing, 0)} bpm` : '–'],
+          [`First sample below the anaerobic threshold (${z.thresholds.anaerobic})`, cross(z.firstBelowAnaerobic)],
+          [`Mean HR when the index was near ${z.thresholds.aerobic}`, isNum(z.hrAtAerobicCrossing) ? `${fmtNum(z.hrAtAerobicCrossing, 0)} bpm` : '–'],
           ['Mean HR in aerobic vs anaerobic samples', isNum(z.hrMeanAerobic) && isNum(z.hrMeanAnaerobic) ? `${fmtNum(z.hrMeanAerobic, 0)} vs ${fmtNum(z.hrMeanAnaerobic, 0)} bpm` : '–'],
           ['Correlation of the index with HR', isNum(z.corrWithHr) ? `${fmtFixed(z.corrWithHr, 2)} (near 0: independent of HR)` : '–'],
           ['Mean index, first half → second half', z.halves ? `${fmtFixed(z.halves.first, 3)} → ${fmtFixed(z.halves.second, 3)}` : '–'],

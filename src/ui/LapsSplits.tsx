@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import type { SessionAnalysis } from '../fit/types';
 import { computeSplits } from '../fit/metrics';
 import { fmtDuration, fmtFixed, fmtNum, fmtSpeed, isNum, speedUnitsLabel } from '../fit/format';
-import { Empty, Table } from './common';
+import { Empty, Table, Tag } from './common';
 
 const SPLIT_OPTIONS = [
   { m: 100, label: '100 m' }, { m: 200, label: '200 m' }, { m: 400, label: '400 m' }, { m: 500, label: '500 m' },
@@ -24,7 +24,7 @@ export function LapsSplits({ s }: { s: SessionAnalysis }) {
   return (
     <div className="stack">
       <section className="card">
-        <h3>Laps <span className="muted">({s.laps.length}, as recorded by the device)</span></h3>
+        <h3>Laps <span className="muted">({s.laps.length})</span><Tag kind="device" /></h3>
         {s.laps.length ? (
           <Table
             headers={['#', 'Start (timer)', 'Time', 'Distance km', paceHdr, 'Max ' + (s.speedMode === 'kmh' ? 'km/h' : 'pace'), 'Avg HR', 'Max HR', 'Avg W', 'Max W', cadHdr, 'Asc / Desc m', 'kcal', 'Trigger']}
@@ -49,7 +49,7 @@ export function LapsSplits({ s }: { s: SessionAnalysis }) {
 
       <section className="card">
         <div className="card-head">
-          <h3>Splits <span className="muted">(computed from the record stream, timer time)</span></h3>
+          <h3>Splits <span className="muted">(from the record stream, timer time)</span><Tag kind="computed" /></h3>
           <label className="inline">
             Every
             <select className="select" value={splitM} onChange={(e) => setSplitM(Number(e.target.value))}>

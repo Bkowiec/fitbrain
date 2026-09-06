@@ -1,5 +1,5 @@
 import { Decoder, Stream, Profile } from '@garmin/fitsdk';
-import type { DecodedFit, DevFieldDef, MessageCount, Msg } from './types';
+import type { DecodedFit, DevFieldDef, MessageCount, Msg, RrBatch } from './types';
 import { humanize } from './format';
 
 /** Lookup of message-key (e.g. "recordMesgs") -> field name -> units, from the SDK profile. */
@@ -41,6 +41,9 @@ const VENDOR_UNIT_FIXES: Record<string, Record<string, string>> = {
   suunto: { peak_epoc: 'ml/kg' },
 };
 
+const RECORD_MESG_NUM = 20;
+const HRV_MESG_NUM = 78;
+
 export function decodeFit(buffer: ArrayBuffer, fileName: string): DecodedFit {
   const stream = Stream.fromArrayBuffer(buffer);
   const decoder = new Decoder(stream);
@@ -48,7 +51,22 @@ export function decodeFit(buffer: ArrayBuffer, fileName: string): DecodedFit {
     throw new Error('This is not a FIT file (bad header).');
   }
   const integrityOk = decoder.checkIntegrity();
+  // Devices write hrv messages in between record messages. The SDK sorts messages by type, so the position in the
+  // file is the only timing information RR intervals have: remember the last record timestamp seen before each hrv message.
+  const rr: RrBatch[] = [];
+  let lastRecordTs: number | undefined;
+  const mesgListener = (num: number, m: Msg) => {
+    if (num === RECORD_MESG_NUM) {
+      const d = m.timestamp instanceof Date ? m.timestamp.getTime() : undefined;
+      if (d !== undefined && Number.isFinite(d)) lastRecordTs = d;
+    } else if (num === HRV_MESG_NUM) {
+      const t = Array.isArray(m.time) ? m.time : [m.time];
+      const vals = t.filter((v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0 && v < 65);
+      if (vals.length) rr.push({ anchorTs: lastRecordTs, rr: vals });
+    }
+  };
   const { messages, errors, profileVersion } = decoder.read({
+    mesgListener,
     applyScaleAndOffset: true,
     expandSubFields: true,
     expandComponents: true,
@@ -111,5 +129,6 @@ export function decodeFit(buffer: ArrayBuffer, fileName: string): DecodedFit {
     messages: msgs,
     devFields,
     messageCounts,
+    rr,
   };
 }

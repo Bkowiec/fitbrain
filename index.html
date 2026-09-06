@@ -3,7 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>FitBrain – FIT file analyzer</title>
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f4f4f1" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0d0d0d" />
+    <meta name="description" content="FitBrain decodes .fit files in your browser, derives the metrics your watch does not show, and writes a report you or your AI coach can read. Nothing leaves your machine." />
+    <title>FitBrain</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <script>
+      // Apply the remembered theme before first paint so the page never flashes the wrong scheme.
+      try { var t = localStorage.getItem('fitbrain.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

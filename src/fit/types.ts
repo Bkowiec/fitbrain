@@ -21,6 +21,12 @@ export interface MessageCount {
   known: boolean;
 }
 
+/** One hrv message: its RR intervals (seconds) and the timestamp of the record message that preceded it in the file, when any. */
+export interface RrBatch {
+  anchorTs?: number; // epoch ms
+  rr: number[];
+}
+
 export interface DecodedFit {
   fileName: string;
   fileSize: number;
@@ -30,6 +36,7 @@ export interface DecodedFit {
   messages: Record<string, Msg[]>;
   devFields: DevFieldDef[];
   messageCounts: MessageCount[];
+  rr: RrBatch[];
 }
 
 export interface KV {
@@ -259,6 +266,38 @@ export interface AthleteSettings {
   lthr?: number; // lactate threshold heart rate
   ftp?: number;
   weightKg?: number;
+  raceDistanceM?: number; // a recent race result used as the basis for predictions
+  raceTimeSec?: number;
+}
+
+/** Reference performance for race predictions. */
+export interface PredictionBasis {
+  name: string;
+  distance: number; // m
+  time: number; // s
+  source: 'effort' | 'race';
+  vdot: number;
+}
+export interface PredictionRow {
+  name: string;
+  distance: number;
+  riegel: number; // predicted seconds
+  vdot: number; // predicted seconds
+}
+export interface TrainingPace {
+  name: string; // E, M, T, I, R
+  label: string;
+  pctLow: number;
+  pctHigh: number;
+  paceSlow: number; // s/km
+  paceFast: number; // s/km
+}
+export interface RacePredictions {
+  bases: PredictionBasis[];
+  basis: PredictionBasis;
+  rows: PredictionRow[];
+  riegelExponent: number;
+  trainingPaces: TrainingPace[];
 }
 
 /** A non-standard record stream (developer field or field outside the core set). */
@@ -312,6 +351,82 @@ export interface ZoneSense {
   halves?: { first: number; second: number };
 }
 
+/** One DFA-α1 window (short-term detrended fluctuation analysis of RR intervals). */
+export interface DfaWindow {
+  timer: number; // timer seconds at the end of the window
+  alpha1: number;
+  beats: number;
+  artefactPct: number;
+  jitterPct: number; // share of successive differences too large for in-exercise HRV (strap noise)
+  spanSec: number; // wall-clock span of the beats in the window
+  reliable: boolean;
+  hr?: number; // mean device HR in the window (bpm); RR-derived only when the file has no HR stream
+}
+export interface DfaCrossing {
+  timer: number;
+  dist?: number;
+  hr?: number;
+}
+export interface DfaThreshold {
+  alpha1: number; // 0.75 (HRVT1) or 0.5 (HRVT2)
+  hr?: number; // regression estimate
+  hrNear?: number; // median HR of windows within ±0.05 of the threshold
+  speed?: number; // m/s, regression estimate
+  power?: number; // W, regression estimate
+  r: number; // correlation HR vs α1 used for the estimate
+  n: number;
+  reached: boolean; // the session had sustained reliable windows on both sides of the threshold (always true when present)
+}
+export interface DfaSplit {
+  index: number;
+  endDist: number;
+  mean: number;
+  heavyPct: number;
+  severePct: number;
+  avgHr?: number;
+  avgSpeed?: number;
+  avgPower?: number;
+}
+/** DFA-α1 analysis computed from RR intervals recorded by any device. */
+export interface DfaAlpha1 {
+  fieldKey: string; // key of the injected record stream ("calc:dfa_a1")
+  windowSec: number;
+  stepSec: number;
+  boxRange: [number, number];
+  thresholds: { aerobic: number; anaerobic: number };
+  rrCount: number;
+  rrUsed: number;
+  artefactPct: number;
+  timingSource: string;
+  hrSource: 'device' | 'rr'; // HR used for threshold estimates: the record HR stream, or RR-derived when the file has none
+  windows: DfaWindow[];
+  reliableWindows: number;
+  coveragePct: number; // share of timer time with a reliable α1 value (time-weighted over samples)
+  startsAtTimer: number;
+  times: { aerobic: number; heavy: number; severe: number }; // seconds, time-weighted over samples like every other zone table
+  stats: { min: number; max: number; mean: number; median: number; p10: number; p90: number };
+  hrvt1?: DfaThreshold;
+  hrvt2?: DfaThreshold;
+  firstBelowAerobic?: DfaCrossing;
+  firstSustainedBelowAerobic?: DfaCrossing;
+  firstBelowAnaerobic?: DfaCrossing;
+  sustainedWindowSec: number;
+  hrMeanAerobic?: number;
+  hrMeanHeavy?: number;
+  hrMeanSevere?: number;
+  corrWithHr?: number;
+  ddfa?: { corr: number; n: number; deviceAerobicTimer?: number }; // validation against Suunto ZoneSense when present
+  perSplit: DfaSplit[];
+  splitDistance: number;
+  halves?: { first: number; second: number };
+}
+
+/** One heartbeat from the RR stream, placed on the session's timer axis. */
+export interface RrBeat {
+  timer: number; // seconds of timer time at the end of the interval
+  rr: number; // seconds
+}
+
 export interface GpsInfo {
   start?: [number, number];
   end?: [number, number];
@@ -352,6 +467,10 @@ export interface SessionAnalysis {
   devFields: KV[];
   devStreams: DevStreamDef[];
   zoneSense?: ZoneSense;
+  dfa?: DfaAlpha1;
+  predictions?: RacePredictions;
+  rrBeats?: RrBeat[];
+  hrv?: HrvStats;
   gps?: GpsInfo;
   quality: KV[];
   raw: Msg;
@@ -365,8 +484,8 @@ export interface Analysis {
   devices: DeviceRow[];
   sessions: SessionAnalysis[];
   events: EventRow[];
-  hrv?: HrvStats;
   profile: KVGroup[];
+  methods: KV[]; // how derived numbers are computed and which constants they rely on
   unknown: {
     messages: { num: string; count: number }[];
     fieldsByMessage: { message: string; fields: string[] }[];

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="220" viewBox="0 0 1200 220" role="img" aria-label="FitBrain, .fit analyzer">
+  <style>
+    .bg{fill:#fcfcfb}.frame{stroke:#e3e2dd}.ink{fill:#0b0b0b}.muted{fill:#75736e}.stroke{stroke:#0b0b0b}.wave{stroke:#c8322b}.chip{fill:#f0efec;stroke:#cbcac4}
+    @media (prefers-color-scheme: dark){.bg{fill:#1a1a19}.frame{stroke:#2c2c2a}.ink{fill:#ffffff}.muted{fill:#8f8e85}.stroke{stroke:#ffffff}.wave{stroke:#ef5b53}.chip{fill:#232322;stroke:#3d3d3a}}
+    text{font-family:"Source Sans 3","Segoe UI",system-ui,-apple-system,sans-serif}
+    .mono{font-family:"Geist Mono",ui-monospace,Menlo,Consolas,monospace}
+  </style>
+  <rect class="bg frame" x="0.5" y="0.5" width="1199" height="219" rx="3"/>
+  <g transform="translate(40 40) scale(2.5)">
+    <path class="stroke" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M12 4.4C10.8 3.3 8.6 3.4 7.6 5.3C5.6 5.2 4.1 7.2 4.9 9.3C3.4 10.4 3.4 13.2 4.9 14.4C4.3 16.6 6 18.6 8.3 18.6C9.2 20.2 11.2 20.4 12 19.2C12.8 20.4 14.8 20.2 15.7 18.6C18 18.6 19.7 16.6 19.1 14.4C20.6 13.2 20.6 10.4 19.1 9.3C19.9 7.2 18.4 5.2 16.4 5.3C15.4 3.4 13.2 3.3 12 4.4Z"/>
+    <path class="wave" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M3.8 12h4.6l1.1-2.2 1.4 4.6 1.5-7 1.5 7.6 1.1-3H20.2"/>
+  </g>
+  <text class="ink" x="118" y="82" font-size="40" font-weight="600" letter-spacing="-1.8">FitBrain</text>
+  <text class="muted mono" x="292" y="82" font-size="15">.fit analyzer</text>
+  <text class="ink" x="40" y="130" font-size="20">Read everything your watch recorded.</text>
+  <text class="muted" x="40" y="156" font-size="14">Decodes .fit files in the browser, derives what the watch does not show, and writes a report people and LLMs can read. Nothing leaves your machine.</text>
+  <g class="mono" font-size="12">
+    <rect class="chip" x="40" y="176" width="104" height="24" rx="2"/><text class="muted" x="52" y="193">runs locally</text>
+    <rect class="chip" x="152" y="176" width="44" height="24" rx="2"/><text class="muted" x="164" y="193">MIT</text>
+    <rect class="chip" x="204" y="176" width="390" height="24" rx="2"/><text class="muted" x="216" y="193">Garmin · Suunto · Wahoo · COROS · Polar · Zwift</text>
+  </g>
+</svg>
