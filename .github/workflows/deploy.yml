@@ -26,7 +26,10 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - run: npm run build
+      - run: npm run test:unit
+      - run: npx playwright install --with-deps chromium
+      # Browser tests build and exercise the production bundle before deployment.
+      - run: npm run test:e2e
       # Pages must be enabled once by a repo admin: Settings -> Pages -> Source: "GitHub Actions".
       # (GITHUB_TOKEN cannot create the Pages site itself.)
       - if: github.event_name != 'pull_request'

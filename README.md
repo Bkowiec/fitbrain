@@ -39,7 +39,8 @@ npm run build      # static bundle in dist/
 npm run preview    # serve dist/
 ```
 
-Drop a `.fit` file on the page or use the file picker.
+Drop one or more `.fit` files on the page or choose them from your device. A single import opens the analysis;
+a batch stays in the activity library.
 
 Dev shortcut: `http://localhost:5173/?file=/@fs/absolute/path/to/activity.fit` auto-loads a file served by Vite.
 
@@ -48,6 +49,78 @@ CLI report without the UI (handy for debugging or batch use):
 ```bash
 npx tsx scripts/report.ts path/to/activity.fit /tmp/out   # writes out.full.md, out.compact.md, out.json
 npm run inspect -- path/to/activity.fit                     # dump message types and sample messages
+```
+
+## Interface and navigation
+
+The sidebar starts with **Activity library**, **Trends and records** and **Athlete settings**. Opening an activity adds
+its main analysis tabs; specialized views are under **More analyses** and appear only when the recording supports them.
+The activity header shows its title, sport and date, with a session selector for multi-sport files.
+
+- **Overview** starts with up to six key metrics. Expand **Training details**, **Advanced metrics** or **Data quality
+  and methods** for the full analysis. **How to read these numbers** explains time, pace and data sources.
+- Browser **Back** and **Forward** navigate between views. **Back to library** and **Back to trends** return to the source
+  even after visiting several analysis tabs. Filters, open history details and scroll positions survive these returns
+  within the page. Hash URLs can be refreshed to reopen a saved activity in the same browser.
+- On phones, history records and comparisons use cards. Expand **More metrics** for HR, power and ascent. Controls have
+  larger touch targets, and the mobile menu supports keyboard focus and Escape.
+
+## Activity library
+
+The **Activity library** is the home screen. Original FIT files, titles, tags and notes are saved locally in
+IndexedDB and remain available after reloading the page. No account or backend is needed.
+
+- Import several files at once. Identical file contents are detected using SHA-256, including files with different
+  names. Existing titles, tags and notes are preserved. A failed file does not stop the rest of the batch.
+- Search titles, filenames, tags and notes; filter by sport, tag or an inclusive date range; sort by date, distance
+  or duration. Dates, tags and sorting are under **More filters**, with active filters shown below the search bar.
+  Dates use the activity's recorded local time when available. Multi-session files occupy one library
+  entry with combined totals and retain their session selector when opened.
+- Click an activity title to analyze the original recording with your current athlete settings. Import and opening
+  calculations run in a Web Worker so the library remains responsive.
+- Open an activity's **⋯** menu and choose **Edit** for a title, comma-separated tags and notes. **Remove** deletes the saved FIT and its metadata from
+  this browser after an inline confirmation; it does not modify the original file on disk.
+- **Backup → Export backup** downloads a versioned JSON archive containing every original FIT file and its titles, tags and
+  notes, regardless of the current filters. Athlete settings are separate and are not included.
+- **Backup → Restore backup** (or **Restore backup** on the empty screen) validates the archive and file hashes before saving new activities in one transaction.
+  It merges with the library, skipping existing files and preserving their current notes and tags. Activity reports
+  from the Report tab are not library backups.
+
+The library belongs to the current browser profile and site address. Clearing browser data removes it; browsers can
+also reclaim local storage. Export a backup to keep an independent copy or move the library to another device.
+
+## Trends and records
+
+Open **Trends and records** in the sidebar to explore the saved library. Filter by sport, tag and period, including
+custom dates. The preset 4-, 12- and 52-week periods end at the latest matching session; the exact dates are shown.
+
+- **Weekly volume:** distance, timer time and session count, with a table of weekly totals and comparison against the
+  preceding period of equal length. Weeks start on Monday, include empty weeks and mark partial boundary weeks.
+  Sessions are assigned to their recorded local start date. Multi-sport files contribute each matching session separately.
+- **Time in zones:** weekly stacked totals for computed HR or power zones. Only sessions with identical zone boundaries
+  are combined; select a definition to see its coverage. Current athlete settings take precedence over parameters in
+  individual FIT files, and recordings without the required data are excluded from the selected zone totals.
+- **Records:** fastest distance efforts and peak average power, grouped by sport within the selected period. Each record
+  links to its original activity and session and shows where the effort starts. Effort times exclude pauses.
+- **Similar activities:** compare pace, time, HR, power and ascent for sessions of the same sport and activity type within
+  10% of a selected session's distance. A shared route tag can narrow the selection; terrain and weather are not matched.
+
+History includes only imported recordings. Summaries are cached locally for fast browsing; older library entries and
+entries affected by a change in athlete settings are analyzed in a worker when this view is opened. Titles, tags, notes
+and original FIT files are preserved. Restoring a backup rebuilds these summaries using the current settings.
+
+## Tests
+
+Unit tests cover history aggregation. Browser regression tests build and exercise the production bundle using generated
+FIT recordings (no personal activity data), including library persistence, history recalculation and mobile layout.
+Both run in CI before deployment:
+
+```bash
+npm run test:unit
+npx playwright install chromium
+npm run test:e2e
+# Or use an installed Google Chrome:
+FITBRAIN_BROWSER_CHANNEL=chrome npm run test:e2e
 ```
 
 ## What is extracted
@@ -131,13 +204,13 @@ anything else is labelled "computed".
 
 ## Athlete settings
 
-FIT files rarely carry the athlete's max HR, LTHR, FTP or weight. The **Athlete** button in the header stores them in your browser (localStorage) and re-runs the analysis. Computed HR zones and "% of max HR" are only produced when a real max HR or LTHR is known (settings or file); the analyzer never uses the activity's own peak HR as a basis. FTP enables power zones, IF and TSS; weight enables W/kg.
+FIT files rarely carry the athlete's max HR, LTHR, FTP or weight. **Athlete settings** in the sidebar stores them in your browser (localStorage) and re-runs the analysis. Computed HR zones and "% of max HR" are only produced when a real max HR or LTHR is known (settings or file); the analyzer never uses the activity's own peak HR as a basis. FTP enables power zones, IF and TSS; weight enables W/kg.
 
 Device summary values are cross-checked against the per-second stream. When they disagree grossly (e.g. Suunto writing vertical oscillation as 0.1 mm while the stream averages 105 mm), the device value is flagged and the stream-derived value is listed under computed metrics.
 
 ## LLM export
 
-The **LLM export** tab produces:
+The **Report** tab produces:
 
 - **Markdown · full** – everything above including the digest, distributions and metadata (~15–25k characters for a 3 h run).
 - **Markdown · compact** – summary, laps, splits, zones, pacing (~8–10k characters).
@@ -161,6 +234,8 @@ src/fit/methods.ts    the "Methods and assumptions" list exported with every rep
 src/fit/zonesense.ts  Suunto ZoneSense / DDFA analysis
 src/fit/format.ts     formatting helpers (pace, durations, local time)
 src/export/           Markdown and JSON report generators
+src/library/          IndexedDB library, file hashing, backup/restore and background analysis worker
+src/history/          per-session history summaries, weekly aggregation, zone grouping and records
 src/ui/               React components (overview, laps & splits, zones, charts, performance, race & pacing, DFA α1, heartbeat replay, ZoneSense, events, raw data, export)
 scripts/              Node helpers: report.ts (full pipeline), inspect-fit.mjs (message dump)
 ```
@@ -175,10 +250,23 @@ scripts/              Node helpers: report.ts (full pipeline), inspect-fit.mjs (
 
 The UI follows the FitBrain brand identity: flat surfaces with a 3 px radius and no shadows, one blue accent that never
 appears inside a chart, series colours used only for the series they name, Source Sans 3 for text and Geist Mono for
-numbers (both from Google Fonts), and a provenance tag on every card and tile: `device` for values written by the watch,
-`computed` (dashed, with a dotted underline on derived numbers) for everything the analyzer adds. Dark mode follows the
+numbers (both from Google Fonts), and provenance labels in detailed sections: `device` for values written by the watch,
+`computed` (dashed, with a dotted underline on derived numbers) for everything the analyzer adds. Summaries explain data
+sources together to reduce repeated labels. Dark mode follows the
 system, with an explicit switch in the sidebar. The only ambient motion is the dot in the sidebar footer, which beats at
-the recording's mean RR interval. The mark ("Brain-pulse"), favicon and icons live in `src/ui/Brand.tsx` and `public/`.
+the recording's mean RR interval. The logo uses a forward-leaning **FB monogram** with outlined lettering. Its vector
+geometry lives in `src/brand/geometry.ts` and is shared by `src/ui/Brand.tsx` and the asset generator, keeping the UI,
+favicon, app icons and README header consistent. Light, dark, monochrome and white SVG variants, plus a visual preview,
+are available in `public/brand/`.
+
+After editing the geometry, regenerate the committed assets:
+
+```bash
+npx playwright install chromium    # once, if no Playwright browser is installed
+npm run brand:generate
+# Or use an installed Google Chrome:
+FITBRAIN_BROWSER_CHANNEL=chrome npm run brand:generate
+```
 
 ## Deploy
 
